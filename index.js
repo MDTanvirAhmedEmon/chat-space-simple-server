@@ -112,6 +112,8 @@ async function run() {
 
         let users = {};
 
+
+
         io.on('connection', (socket) => {
             console.log('User Connected', socket.id);
 
@@ -134,28 +136,30 @@ async function run() {
 
                 io.to(users[receiverId]).emit('receiverMessage', { text, senderId });
 
-                app.get('/conversation/:user1Id/:user2Id', async (req, res) => {
-                    const { user1Id, user2Id } = req.params;
-                    console.log(user1Id, user2Id)
-
-                    // Fetch messages where user1Id is either the sender or receiver
-                    const conversation = await messageCollection.find({
-                        $or: [
-                            { senderId: user1Id, receiverId: user2Id },
-                            { senderId: user2Id, receiverId: user1Id }
-                        ]
-                    }).sort({ timestamp: 1 }).toArray(); // Sort by timestamp (optional)
-
-                    res.json(conversation);
-                });
 
 
+
+            });
+            app.get('/conversation/:user1Id/:user2Id', async (req, res) => {
+                const { user1Id, user2Id } = req.params;
+                console.log(user1Id, user2Id)
+
+                // Fetch messages where user1Id is either the sender or receiver
+                const conversation = await messageCollection.find({
+                    $or: [
+                        { senderId: user1Id, receiverId: user2Id },
+                        { senderId: user2Id, receiverId: user1Id }
+                    ]
+                }).sort({ timestamp: 1 }).toArray(); // Sort by timestamp (optional)
+
+                res.json(conversation);
             });
 
             socket.on('disconnect', () => {
                 console.log('User Disconnected', socket.id);
             });
         });
+
 
 
 
