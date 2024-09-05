@@ -96,10 +96,30 @@ async function run() {
             const objectId = new ObjectId(myId);
             try {
                 const users = await userCollection.find({ _id: { $ne: objectId } }).toArray();
+
+                const userWithLastMessage = await Promise.all(users.map(async (user) => {
+
+                    const lastMessage = await messageCollection.findOne({
+                        $or: [
+                            { senderId: myId, receiverId: user._id.toString() },
+                            { senderId: user._id.toString(), receiverId: myId }
+                        ]
+                    }, {
+                        sort: { timestamp: -1 }
+                    });
+
+                    return {
+                        _id: user._id,
+                        name: user.name,
+                        lastMessage: lastMessage ? lastMessage.text : "No message available",
+                        time: lastMessage ? lastMessage.timestamp : null
+                    };
+                }));
+
                 return res.status(200).json({
                     message: "Get All Users",
                     success: true,
-                    data: users,
+                    data: userWithLastMessage,
                 });
             } catch (error) {
                 return res.status(500).json({
@@ -110,9 +130,29 @@ async function run() {
             }
         });
 
+        app.get('/single-user/:id', async (req, res) => {
+            const userId = req.params.id;
+            console.log('myId', userId)
+            const objectId = new ObjectId(userId);
+            try {
+                const user = await userCollection.findOne({ _id: objectId });
+                return res.status(200).json({
+                    message: "Get Single User",
+                    success: true,
+                    data: user,
+                });
+            } catch (error) {
+                return res.status(500).json({
+                    message: "Error fetching user",
+                    success: false,
+                    error: error.message,
+                });
+            }
+        });
+
+
+        // Socket Io
         let users = {};
-
-
 
         io.on('connection', (socket) => {
             console.log('User Connected', socket.id);
@@ -125,43 +165,56 @@ async function run() {
                 console.log(data);
                 const { senderId, receiverId, text } = data;
 
+                // Save Message TO DB
                 const savedMessage = await messageCollection.insertOne({
                     senderId,
                     receiverId,
                     text,
-                    timestamp: new Date(), // Optionally add a timestamp
+                    timestamp: new Date(),
                 });
+                
+                // send real time data to sender and receiver
+                io.emit(`receiverMessage:${senderId}`, { text, senderId });
+                io.emit(`receiverMessage:${receiverId}`, { text, senderId });
+                // io.to(users[receiverId]).emit('receiverMessage', { text, senderId });
+                // io.to(users[senderId]).emit('receiverMessage', { text, senderId });
 
-                io.to(users[senderId]).emit('receiverMessage', { text, senderId });
+                // if (users[receiverId]) {
 
-                io.to(users[receiverId]).emit('receiverMessage', { text, senderId });
+                //     io.to(users[receiverId]).emit('receiverMessage', { text, senderId });
+                // } else {
+                //     console.log(`User ${receiverId} is not connected.`);
 
-
-
+                // }
 
             });
+
+            // Get Conversation Of Two Users
             app.get('/conversation/:user1Id/:user2Id', async (req, res) => {
                 const { user1Id, user2Id } = req.params;
                 console.log(user1Id, user2Id)
 
-                // Fetch messages where user1Id is either the sender or receiver
                 const conversation = await messageCollection.find({
                     $or: [
                         { senderId: user1Id, receiverId: user2Id },
                         { senderId: user2Id, receiverId: user1Id }
                     ]
-                }).sort({ timestamp: 1 }).toArray(); // Sort by timestamp (optional)
+                }).sort({ timestamp: 1 }).toArray();
 
                 res.json(conversation);
             });
 
             socket.on('disconnect', () => {
                 console.log('User Disconnected', socket.id);
+                for (const userId in users) {
+                    if (users[userId] === socket.id) {
+                        delete users[userId];
+                        console.log(`User ${userId} with socket ID ${socket.id} removed.`);
+                    }
+                }
             });
+
         });
-
-
-
 
     } finally {
 
